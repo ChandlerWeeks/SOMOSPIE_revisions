@@ -1,3 +1,6 @@
 [submodule "code/ipywe"]
 	path = code/ipywe
 	url = https://github.com/scikit-beam/ipywe.git
+[submodule "GEOtiled"]
+	path = GEOtiled
+	url = https://github.com/TauferLab/GEOtiled
