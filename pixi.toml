@@ -1,0 +1,13 @@
+[workspace]
+name = "somospie"
+version = "0.1.0"
+description = "SOMOSPIE Python/GDAL migration environment"
+authors = ["SOMOSPIE contributors"]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+requires-pixi = ">=0.55"
+
+[dependencies]
+python = "3.11.*"
+gdal = ">=3.13.0,<4"
+pandas = ">=3.0.3,<4"

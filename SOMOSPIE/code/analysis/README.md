@@ -2,7 +2,7 @@
 
 Scripts to calculate the root mean square error
 
-    obs_vs_pred.R
+    obs_vs_pred.py
     
     Takes two .csv files, 
           extracts the points in pred to the grid of obs, 

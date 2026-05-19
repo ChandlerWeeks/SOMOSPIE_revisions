@@ -52,16 +52,16 @@ from utils import *
 def curate(MONTH_DICT, PARAMS_FILE, LOG_FILE, SM_FILE, COV_FILE, COV_LAYERS, EVAL_FILE, SHAPE_DIR, 
            REG_LIST, BUFFER, TRAIN_DIR, MONTH, 
            EVAL_DIR, USE_PCA, VALIDATE, STATS_FILE="", RAND=0, SUPER=0, MIN_T_POINTS=-1):
-    MASK_PATH = pathlib.Path("preprocessing/create_shape.R").resolve()
-    CROP_PATH = pathlib.Path("preprocessing/crop_to_shape.R").resolve()
-    ADD_COV_PATH = pathlib.Path("preprocessing/add_topos.R").resolve()
+    MASK_PATH = pathlib.Path("preprocessing/create_shape.py").resolve()
+    CROP_PATH = pathlib.Path("preprocessing/crop_to_shape.py").resolve()
+    ADD_COV_PATH = pathlib.Path("preprocessing/add_topos.py").resolve()
     DROP_COLS_PATH = pathlib.Path("preprocessing/drop_cols.py").resolve()
     
     # Prepare shape for cropping.
     def create_shape(reg_type, reg, SHAPE_DIR=SHAPE_DIR):
         if not SHAPE_DIR.is_dir():
             SHAPE_DIR.mkdir(parents=True)
-        SHAPE_FILE = SHAPE_DIR.joinpath(f"{reg}.rds")
+        SHAPE_FILE = SHAPE_DIR.joinpath(f"{reg}.geojson")
         if SHAPE_FILE.is_file():
             log.write(f"shape for {reg} exists in {SHAPE_DIR}\n")
         else:

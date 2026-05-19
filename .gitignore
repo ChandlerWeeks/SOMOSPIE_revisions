@@ -21,6 +21,9 @@
 *.Rhistory
 .ipynb_checkpoints
 *.swp
+.pixi/
+.pytest_cache/
+.ruff_cache/
 *.dbf
 *.prj
 *.sbn

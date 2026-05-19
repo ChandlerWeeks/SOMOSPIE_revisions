@@ -18,7 +18,7 @@ from time import time
 
 def analysis(REGION, PRED_DIR, ORIG_DIR, VALIDATE, R2_FILE, RMSE_FILE):
 
-    RESID_COMP = pathlib.Path("analysis/obs_vs_pred.R").resolve()
+    RESID_COMP = pathlib.Path("analysis/obs_vs_pred.py").resolve()
 
     PREDS = PRED_DIR.joinpath(REGION, SUB_PRED)
     RESIDS = PRED_DIR.joinpath(REGION, SUB_RESI)

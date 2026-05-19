@@ -314,11 +314,11 @@ def source_widget(default_widget):
 def sm_fetch(year=2017, sm_source="ESA"):
     if sm_source=="ESA":
         if (1978 < year < 2020):
-            sm_file = f"{SUB_DATA}/ESA_CCI/{year}_ESA_monthly.rds"
+            sm_file = f"{SUB_DATA}/ESA_CCI/{year}_ESA_monthly.tif"
             if not os.path.exists(sm_file):
                 if not os.path.exists(f"{SUB_SOIL}/ESA_CCI/{year}"):
                     bash([f"{SUB_SOIL}/fetch_soil_moisture.sh", year])
-                bash([f"{SUB_CODE}/preprocessing/extract_SM_monthly.R", year, f"{SUB_DATA}/ESA_CCI"])
+                bash([f"{SUB_CODE}/preprocessing/extract_SM_monthly.py", year, f"{SUB_DATA}/ESA_CCI"])
             if os.path.exists(sm_file):
                 print(f"Monthly means generated for {year}.")
             else:
@@ -510,9 +510,9 @@ def topo_fetch(topos=["Slope"], agg_fact=1):
             pre_file = f"{topo_folder}{t}.sdat"
             if agg_fact>1:
                 print(f"Scaling {t} to be more coarse, mean-aggragating by a factor of {agg_fact}.")
-                bash([f"{SUB_CODE}/preprocessing/coarsify.R",  pre_file, topo_file, agg_fact])
+                bash([f"{SUB_CODE}/preprocessing/coarsify.py",  pre_file, topo_file, agg_fact])
                 pre_file = topo_file
-            bash([f"{SUB_CODE}/preprocessing/reproject_raster.R", pre_file, topo_file])
+            bash([f"{SUB_CODE}/preprocessing/reproject_raster.py", pre_file, topo_file])
             print(f"Topo layer {t} loaded.")
         
     print("A .tif is ready for every topography layer.")
@@ -537,7 +537,7 @@ def topo_stack(topos=["Slope"], agg_fact=1, out_file=""):
     for t in topos:
         topo_file = f"{agg_fact}{t}.tif"
         
-        stack_args = [f"{SUB_CODE}/preprocessing/make_raster_stack.R", topo_folder, stack_file, "stack.tif", topo_file]
+        stack_args = [f"{SUB_CODE}/preprocessing/make_raster_stack.py", topo_folder, stack_file, "stack.tif", topo_file]
         if t==topos[0]:
             stack_args.pop(-2)
         bash(stack_args)
