@@ -11,7 +11,15 @@ gdal.UseExceptions()
 osr.UseExceptions()
 
 DEFAULT_NODATA = -9999.0
+WGS84_PROJ4 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
 DEFAULT_CREATION_OPTIONS = ["COMPRESS=LZW", "TILED=YES", "BIGTIFF=IF_SAFER"]
+
+
+def _wgs84_projection():
+    """Return the default WGS84 projection for ESA CCI lon/lat grids."""
+    srs = osr.SpatialReference()
+    srs.ImportFromProj4(WGS84_PROJ4)
+    return srs.ExportToWkt()
 
 
 def _open_sm_dataset(path):
@@ -39,7 +47,7 @@ def _open_sm_dataset(path):
 
 def _month_files(year, directory, month):
     """Return daily NetCDF files matching one year and month."""
-    pattern = f"{year}{month:02d}*.nc"
+    pattern = f"*{year}{month:02d}*.nc"
     return sorted(Path(directory, str(year)).glob(pattern))
 
 
@@ -52,7 +60,8 @@ def _read_array(path):
         nodata = band.GetNoDataValue()
         if nodata is not None:
             array[array == nodata] = np.nan
-        return array, ds.GetGeoTransform(), ds.GetProjection(), ds.RasterXSize, ds.RasterYSize
+        projection = ds.GetProjection() or _wgs84_projection()
+        return array, ds.GetGeoTransform(), projection, ds.RasterXSize, ds.RasterYSize
     finally:
         ds = None
 
@@ -72,8 +81,12 @@ def _monthly_mean(files):
     if not arrays:
         return None, metadata
 
-    with np.errstate(invalid="ignore"):
-        mean = np.nanmean(np.stack(arrays, axis=0), axis=0)
+    stack = np.stack(arrays, axis=0)
+    valid = np.isfinite(stack)
+    count = valid.sum(axis=0)
+    total = np.where(valid, stack, 0.0).sum(axis=0)
+    mean = np.full(stack.shape[1:], np.nan, dtype=np.float64)
+    np.divide(total, count, out=mean, where=count > 0)
     return mean, metadata
 
 

@@ -4,9 +4,11 @@ import argparse
 import csv
 import math
 import os
+import sys
 import tempfile
 from pathlib import Path
 
+import numpy as np
 from osgeo import gdal, ogr, osr
 
 gdal.UseExceptions()
@@ -137,8 +139,25 @@ def _format_value(value, nodata):
     return value
 
 
-def raster_to_csv(dataset, output_csv, layer_names=None):
-    """Write a raster dataset to a SOMOSPIE x/y/value CSV table."""
+def _block_coordinates(transform, row_start, row_indices, col_indices):
+    """Return cell-center coordinates for flattened block row/column indices."""
+    origin_x, pixel_width, rotation_x, origin_y, rotation_y, pixel_height = transform
+    absolute_rows = row_start + row_indices
+    xs = origin_x + (col_indices + 0.5) * pixel_width + (absolute_rows + 0.5) * rotation_x
+    ys = origin_y + (col_indices + 0.5) * rotation_y + (absolute_rows + 0.5) * pixel_height
+    return xs, ys
+
+
+def _invalid_mask(array, nodata):
+    """Return cells that should be treated as missing."""
+    invalid = ~np.isfinite(array)
+    if nodata is not None:
+        invalid |= array == nodata
+    return invalid
+
+
+def _raster_to_csv_legacy(dataset, output_csv, layer_names=None):
+    """Write a raster CSV with NA placeholders for partially missing rows."""
     transform = dataset.GetGeoTransform()
     names = _raster_band_names(dataset, layer_names or [])
     bands = [dataset.GetRasterBand(i) for i in range(1, dataset.RasterCount + 1)]
@@ -158,12 +177,56 @@ def raster_to_csv(dataset, output_csv, layer_names=None):
                 writer.writerow([xs[col], ys[col]] + formatted)
 
 
+def raster_to_csv(dataset, output_csv, layer_names=None, drop_any_nodata=False, block_rows=64):
+    """Write a raster dataset to a SOMOSPIE x/y/value CSV table."""
+    if not drop_any_nodata:
+        _raster_to_csv_legacy(dataset, output_csv, layer_names=layer_names)
+        return
+
+    transform = dataset.GetGeoTransform()
+    names = _raster_band_names(dataset, layer_names or [])
+    bands = [dataset.GetRasterBand(i) for i in range(1, dataset.RasterCount + 1)]
+    nodata = [band.GetNoDataValue() for band in bands]
+    width = dataset.RasterXSize
+    height = dataset.RasterYSize
+    block_rows = max(1, int(block_rows))
+    total_rows = 0
+
+    with open(output_csv, "w", newline="") as dst:
+        dst.write(",".join(["x", "y"] + names) + "\n")
+        for row_start in range(0, height, block_rows):
+            rows = min(block_rows, height - row_start)
+            arrays = []
+            invalid_masks = []
+            for band, band_nodata in zip(bands, nodata):
+                array = band.ReadAsArray(0, row_start, width, rows).astype(np.float64, copy=False)
+                arrays.append(array)
+                invalid_masks.append(_invalid_mask(array, band_nodata))
+
+            valid = ~np.logical_or.reduce(invalid_masks)
+            if valid.any():
+                row_indices, col_indices = np.nonzero(valid)
+                xs, ys = _block_coordinates(transform, row_start, row_indices, col_indices)
+                values = np.stack(arrays, axis=-1)[row_indices, col_indices, :]
+                output = np.column_stack((xs, ys, values))
+                np.savetxt(dst, output, delimiter=",", fmt="%.12g")
+                total_rows += output.shape[0]
+
+            row_end = row_start + rows
+            if row_end == height or row_end % (block_rows * 5) == 0:
+                print(
+                    f"CSV export progress: raster rows {row_end}/{height}; output rows {total_rows}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+
 def _output_is_raster(output_file):
     """Return whether the output extension should be written as raster data."""
     return Path(output_file).suffix.lower() in {".tif", ".tiff", ".vrt", ".img"}
 
 
-def crop_raster(input_file, shape_path, output_file, buffer_meters=0, layer_names=None):
+def crop_raster(input_file, shape_path, output_file, buffer_meters=0, layer_names=None, drop_any_nodata=False):
     """Crop and mask a raster by region, writing raster or CSV output."""
     source = gdal.Open(str(input_file), gdal.GA_ReadOnly)
     if source is None:
@@ -180,6 +243,11 @@ def crop_raster(input_file, shape_path, output_file, buffer_meters=0, layer_name
             warp_target = str(target)
             warp_format = "GTiff" if target.suffix.lower() != ".vrt" else "VRT"
         else:
+            target = Path(output_file)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temp_output = target.with_suffix(target.suffix + ".tmp")
+            if temp_output.exists():
+                temp_output.unlink()
             warp_target = ""
             warp_format = "MEM"
 
@@ -187,7 +255,7 @@ def crop_raster(input_file, shape_path, output_file, buffer_meters=0, layer_name
             "format": warp_format,
             "cutlineDSName": str(cutline),
             "cropToCutline": True,
-            "dstNodata": DEFAULT_NODATA,
+            "dstNodata": DEFAULT_NODATA if warp_format != "MEM" else -3.4028234663852886e38,
         }
         if warp_format != "MEM":
             warp_kwargs["creationOptions"] = DEFAULT_CREATION_OPTIONS
@@ -198,12 +266,13 @@ def crop_raster(input_file, shape_path, output_file, buffer_meters=0, layer_name
             raise RuntimeError("GDAL failed to crop/mask raster.")
 
         if not _output_is_raster(output_file):
-            raster_to_csv(cropped, output_file, layer_names=layer_names)
+            raster_to_csv(cropped, temp_output, layer_names=layer_names, drop_any_nodata=drop_any_nodata)
+            os.replace(temp_output, output_file)
         cropped = None
     finally:
         source = None
-        if temp_output:
-            gdal.Unlink(temp_output)
+        if temp_output and Path(temp_output).exists():
+            Path(temp_output).unlink()
         if cutline.exists():
             cutline.unlink()
 
@@ -264,13 +333,13 @@ def crop_points(input_file, shape_path, output_file, buffer_meters=0):
         os.replace(temp_path, output_path)
 
 
-def crop_to_shape(input_file, shape_path, output_file, buffer_meters=0, layer_names=None):
+def crop_to_shape(input_file, shape_path, output_file, buffer_meters=0, layer_names=None, drop_any_nodata=False):
     """Crop raster or point CSV input to a supplied region shape."""
     ext = Path(input_file).suffix.lower()
     if ext in CSV_EXTENSIONS:
         crop_points(input_file, shape_path, output_file, buffer_meters)
     elif ext in RASTER_EXTENSIONS or gdal.Open(str(input_file), gdal.GA_ReadOnly) is not None:
-        crop_raster(input_file, shape_path, output_file, buffer_meters, layer_names)
+        crop_raster(input_file, shape_path, output_file, buffer_meters, layer_names, drop_any_nodata)
     else:
         raise ValueError(f"Unsupported input file type: {input_file}")
 
@@ -282,6 +351,7 @@ def parse_args():
     parser.add_argument("shape_path")
     parser.add_argument("output_file")
     parser.add_argument("buffer", nargs="?", default=0, type=int)
+    parser.add_argument("--drop-any-nodata", action="store_true", help="For raster-to-CSV output, write only rows where every raster band is valid.")
     parser.add_argument("layer_names", nargs="*")
     return parser.parse_args()
 
@@ -289,7 +359,7 @@ def parse_args():
 def main():
     """Run the command-line entry point."""
     args = parse_args()
-    crop_to_shape(args.input_file, args.shape_path, args.output_file, args.buffer, args.layer_names)
+    crop_to_shape(args.input_file, args.shape_path, args.output_file, args.buffer, args.layer_names, args.drop_any_nodata)
 
 
 if __name__ == "__main__":
